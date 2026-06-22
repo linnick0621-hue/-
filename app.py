@@ -95,21 +95,26 @@ if df_pivot is None:
 tab1, tab2 = st.tabs(["📊 歷史年度大數據", "🎯 XGBoost 模型驗證與 6 月全月預報"])
 
 # ---------------------------------------------------------------------
-# Tab 1: Historical Data View (💡 終極修正：改用 Rolling 避開 resample NaN 陷阱)
+# Tab 1: Historical Data View (💡 終極強制時間索引轉換)
 # ---------------------------------------------------------------------
 with tab1:
     st.header(f"📅 {station_choice} - 歷史總體 PM2.5 趨勢檢視")
     
-    # 💡 核心安全修正：直接複製原生逐時資料，不要用 resample 壓縮它！
-    df_hist = df_pivot[['PM2.5']].copy()
+    # 💡 終極修正 1：建立一個乾淨的 DataFrame，並「強迫」將索引轉為 Datetime 物件型態
+    df_hist = pd.DataFrame(index=pd.to_datetime(df_pivot.index))
+    df_hist['PM2.5'] = df_pivot['PM2.5'].values
     
-    # 為了防止 5 萬個小時點畫圖卡死，我們使用每 24 小時的滾動滑動平均（Rolling Mean）來平滑數據
-    df_hist['PM2.5_Smooth'] = df_hist['PM2.5'].rolling(window=24, min_periods=1).mean()
-    df_hist.index.name = 'date'
+    # 💡 終極修正 2：將逐時資料重採樣為「每日平均（'D'）」，大幅減少繪圖點數，防止網頁卡死
+    df_hist_daily = df_hist.resample('D').mean()
+    df_hist_daily.index.name = 'date'
+    
+    # 補洞，確保線條連續
+    df_hist_daily['PM2.5'] = df_hist_daily['PM2.5'].interpolate(method='linear').bfill().ffill()
     
     st.markdown("### 🔍 歷年波動資料觀測")
-    # 💡 僅繪製平滑化之後的曲線，並精確指定欄位，徹底跟 0 死線說再見！
-    st.line_chart(df_hist[['PM2.5_Smooth']], y="PM2.5_Smooth")
+    
+    # 💡 終極修正 3：明確指定 x 與 y 軸，強制 Streamlit 啟用時間軸引擎
+    st.line_chart(df_hist_daily, y="PM2.5")
     
     st.info(f"資料統計範圍：{df_pivot.index.min()} 至 {df_pivot.index.max()}，共 {len(df_pivot):,} 筆原始資料。")
 
