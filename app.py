@@ -68,7 +68,7 @@ def load_and_process_data(path):
     df_all['concentration'] = df_all['concentration'].astype(str).str.replace('"', '').str.replace("'", "").str.strip()
     df_all['concentration'] = pd.to_numeric(df_all['concentration'], errors='coerce')
     
-    # 強制對齊時間格式
+    # 強制對齊時間格式並轉換為 Datetime 物件
     df_all['monitordate'] = pd.to_datetime(df_all['monitordate'], format='mixed', errors='coerce')
     df_all = df_all.dropna(subset=['monitordate', 'concentration'])
     
@@ -95,17 +95,18 @@ if df_pivot is None:
 tab1, tab2 = st.tabs(["📊 歷史年度大數據", "🎯 XGBoost 模型驗證與 6 月全月預報"])
 
 # ---------------------------------------------------------------------
-# Tab 1: Historical Data View (Fixed Horizontal Zero Line with st.area_chart)
+# Tab 1: Historical Data View (Fixed Front-end Crash Issue)
 # ---------------------------------------------------------------------
 with tab1:
     st.header(f"📅 {station_choice} - 歷史總體 PM2.5 趨勢檢視")
     
-    # 💡 終極修正 1：將逐時資料重採樣為「每日平均」，並轉化為簡單日期格式，徹底釋放繪圖引擎
+    # 💡 終極修正 1：計算每日平均值，維持「真正的時間型態索引 (DatetimeIndex)」，並強制命名為 'date'
     df_hist_daily = df_pivot[['PM2.5']].resample('D').mean()
-    df_hist_daily.index = df_hist_daily.index.strftime('%Y-%m-%d')
+    df_hist_daily.index = pd.to_datetime(df_hist_daily.index)
+    df_hist_daily.index.name = 'date'
     
-    # 💡 終極修正 2：改用相容性最高、絕對不會變成 0 死線的 st.area_chart 區域折線圖
-    st.area_chart(df_hist_daily)
+    # 💡 終極修正 2：改用 st.line_chart，當索引是時間型態時它會自動縮放，絕對不會再死機卡死！
+    st.line_chart(df_hist_daily, y="PM2.5")
     st.info(f"資料統計範圍：{df_pivot.index.min()} 至 {df_pivot.index.max()}，共 {len(df_pivot):,} 筆原始資料。")
 
 # ---------------------------------------------------------------------
@@ -150,6 +151,7 @@ with tab2:
     st.subheader(f"🔮 {station_choice} - 2026年6月份 PM2.5 預報與觀測對比圖")
     st.markdown("> 💡 **提示**：滑鼠移過去可以直接看到每小時的精確數值，也可以用兩指縮放看細節喔！")
     
-    # 💡 終極修正 3：對齊時間格式
-    df_chart.index = df_chart.index.strftime('%Y-%m-%d %H:%M')
+    # 💡 終極修正 3：對齊時間型態，避免文字卡死
+    df_chart.index = pd.to_datetime(df_chart.index)
+    df_chart.index.name = 'date'
     st.line_chart(df_chart, y=['XGBoost 全月預測值', '最新實際觀測值'] if '最新實際觀測值' in df_chart.columns else ['XGBoost 全月預測值'])
