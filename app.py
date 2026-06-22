@@ -33,7 +33,7 @@ else:
     folder_path = "仁武測站"
 
 # =====================================================================
-# 3. Core Data Processing Engine
+# 3. Core Data Processing Engine - UPGRADED!
 # =====================================================================
 @st.cache_data(ttl=600) 
 def load_and_process_data(path):
@@ -44,36 +44,62 @@ def load_and_process_data(path):
     dfs = []
     for f in files:
         try:
-            df_single = pd.read_csv(f, sep=None, engine='python', on_bad_lines='skip', encoding='utf-8-sig')
-            if len(df_single.columns) == 1 and df_single.columns[0] == '即時值查詢':
-                df_single = pd.read_csv(f, sep=None, engine='python', on_bad_lines='skip', encoding='utf-8-sig', skiprows=1)
+            # 💡 New: Explicitly set encoding to utf-8-sig to handle BOM
+            df_single = pd.read_csv(f, engine='python', on_bad_lines='skip', encoding='utf-8-sig')
             
+            # Handle special format with title row
+            if len(df_single.columns) == 1 and df_single.columns[0] == '即時值查詢':
+                df_single = pd.read_csv(f, engine='python', on_bad_lines='skip', encoding='utf-8-sig', skiprows=1)
+            
+            # Translation Dictionary
             rename_dict = {
                 '監測日期': 'monitordate', '日期': 'monitordate', '時間': 'monitordate', 'date': 'monitordate',
                 '測項英文名稱': 'itemengname', '測項': 'itemengname', '項目': 'itemengname', 'item': 'itemengname',
                 '監測值': 'concentration', '數值': 'concentration', '測值': 'concentration', 'value': 'concentration'
             }
             df_single = df_single.rename(columns=rename_dict)
-            if 'monitordate' in df_single.columns and 'itemengname' in df_single.columns:
+            
+            # Ensure core columns exist
+            if 'monitordate' in df_single.columns and 'itemengname' in df_single.columns and 'concentration' in df_single.columns:
                 dfs.append(df_single)
-        except:
+        except Exception as e:
+            # st.warning(f"Error loading {f}: {e}") # For debugging
             continue
             
     if not dfs:
         return None
         
     df_all = pd.concat(dfs, ignore_index=True)
+    
+    # Process concentration: convert to numeric, handle invalid characters
     df_all['concentration'] = pd.to_numeric(df_all['concentration'], errors='coerce')
     
-    df_pivot = df_all.pivot_table(index='monitordate', columns='itemengname', values='concentration')
-    df_pivot.index = pd.to_datetime(df_pivot.index, format='mixed')
-    df_pivot = df_pivot.sort_index().interpolate(method='linear').bfill().ffill()
-    return df_pivot
+    # 💡 New: Filter out NaN concentrations before pivot
+    df_all = df_all.dropna(subset=['concentration'])
+    
+    if df_all.empty:
+        return None
 
+    # Pivot Table
+    try:
+        df_pivot = df_all.pivot_table(index='monitordate', columns='itemengname', values='concentration')
+        df_pivot.index = pd.to_datetime(df_pivot.index, format='mixed')
+        
+        # 💡 New: Check if 'PM2.5' column exists after pivot
+        if 'PM2.5' not in df_pivot.columns:
+            return None
+
+        # Sort, interpolate, and fill missing values
+        df_pivot = df_pivot.sort_index().interpolate(method='linear').bfill().ffill()
+        return df_pivot
+    except:
+        return None
+
+# Load Data
 df_pivot = load_and_process_data(folder_path)
 
 if df_pivot is None:
-    st.error(f"❌ 找不到 CSV 檔案！請確認 GitHub 儲存庫中是否有包含正確的「{folder_path}」資料夾。")
+    st.error(f"❌ 資料載入失敗！在「{folder_path}」資料夾中找不到有效的 CSV 檔案，或是 CSV 檔案中缺少必要的欄位（如：PM2.5）。")
     st.stop()
 
 # =====================================================================
@@ -82,18 +108,30 @@ if df_pivot is None:
 tab1, tab2 = st.tabs(["📊 歷史年度大數據", "🎯 XGBoost 模型驗證與 6 月全月預報"])
 
 # ---------------------------------------------------------------------
-# Tab 1: Historical Data View
+# Tab 1: Historical Data View - ENHANCED!
 # ---------------------------------------------------------------------
 with tab1:
     st.header(f"📅 {station_choice} - 歷史總體 PM2.5 趨勢檢視")
-    df_hist = df_pivot[['PM2.5']].copy()
-    st.line_chart(df_hist, y="PM2.5")
+    
+    # 💡 New: Safety Check before drawing
+    if 'PM2.5' in df_pivot.columns and not df_pivot['PM2.5'].empty:
+        df_hist = df_pivot[['PM2.5']].copy()
+        st.line_chart(df_hist, y="PM2.5")
+        st.info(f"資料統計範圍：{df_hist.index.min()} 至 {df_hist.index.max()}，共 {len(df_hist):,} 筆資料。")
+    else:
+        st.warning("⚠️ 歷史資料中缺少有效的 PM2.5 數據，無法繪製趨勢圖。")
 
 # ---------------------------------------------------------------------
 # Tab 2: XGBoost Prediction View
 # ---------------------------------------------------------------------
 with tab2:
     st.header("🎯 XGBoost 歷史模型驗證與全月趨勢預報")
+    
+    # Safety Check: Can only predict if historical PM2.5 exists
+    if 'PM2.5' not in df_pivot.columns or df_pivot['PM2.5'].empty:
+         st.error("⚠️ 核心資料缺失：歷史資料中缺少 PM2.5 數據，AI 無法進行訓練或預測。")
+         st.stop()
+         
     st.success("模型評估成功！測試集決定係數 (R² Score) 達 0.79，具備高度準確信賴區間。")
     
     # Feature Engineering
@@ -105,8 +143,11 @@ with tab2:
     df_future_ml['day'] = df_future_ml.index.day
     
     time_features = ['hour', 'dayofweek', 'month', 'year', 'day']
-    model_future = xgb.XGBRegressor(n_estimators=150, learning_rate=0.05, max_depth=6, random_state=42)
-    model_future.fit(df_future_ml[time_features], df_future_ml['PM2.5'])
+    
+    # Train Model
+    with st.spinner('正在針對選定測站重新訓練 AI 模型...'):
+        model_future = xgb.XGBRegressor(n_estimators=150, learning_rate=0.05, max_depth=6, random_state=42)
+        model_future.fit(df_future_ml[time_features], df_future_ml['PM2.5'])
     
     # Generate June Timestamps
     june_timestamps = pd.date_range(start='2026-06-01 00:00:00', end='2026-06-30 23:00:00', freq='h')
