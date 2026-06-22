@@ -33,7 +33,7 @@ else:
     folder_path = "仁武測站"
 
 # =====================================================================
-# 3. Core Data Processing Engine (Ultimate Text Cleansing)
+# 3. Core Data Processing Engine (Jupyter Native Matching Version)
 # =====================================================================
 @st.cache_data(ttl=600) 
 def load_and_process_data(path):
@@ -63,22 +63,15 @@ def load_and_process_data(path):
         return None
         
     df_all = pd.concat(dfs, ignore_index=True)
-    
-    # 💡 核心安全修正 1：全面去除政府 CSV 裡夾雜的引號、空格、x、* 等無效雜質
-    df_all['concentration'] = df_all['concentration'].astype(str).str.replace('"', '').str.replace("'", "").str.strip()
     df_all['concentration'] = pd.to_numeric(df_all['concentration'], errors='coerce')
     
-    # 強制時間格式對齊
-    df_all['monitordate'] = pd.to_datetime(df_all['monitordate'], format='mixed', errors='coerce')
-    df_all = df_all.dropna(subset=['monitordate', 'concentration'])
-    
-    # 建立樞紐表
-    df_pivot = df_all.pivot_table(index='monitordate', columns='itemengname', values='concentration', aggfunc='mean')
+    # 完美複製你的 Jupyter 樞紐表邏輯
+    df_pivot = df_all.pivot_table(index='monitordate', columns='itemengname', values='concentration')
+    df_pivot.index = pd.to_datetime(df_pivot.index, format='mixed')
     df_pivot = df_pivot.sort_index()
     
-    # 💡 核心安全修正 2：確保 PM2.5 存在，並使用強力雙向插值補滿所有的洞
     if 'PM2.5' in df_pivot.columns:
-        df_pivot['PM2.5'] = pd.to_numeric(df_pivot['PM2.5'], errors='coerce')
+        # 強力雙向線性插值補洞
         df_pivot['PM2.5'] = df_pivot['PM2.5'].interpolate(method='linear').bfill().ffill()
         return df_pivot
     else:
@@ -96,20 +89,21 @@ if df_pivot is None:
 tab1, tab2 = st.tabs(["📊 歷史年度大數據", "🎯 XGBoost 模型驗證與 6 月全月預報"])
 
 # ---------------------------------------------------------------------
-# Tab 1: Historical Data View (Fixed Horizontal Zero Line Issue)
+# Tab 1: Historical Data View (Fixed Resample Zero-Line Bug)
 # ---------------------------------------------------------------------
 with tab1:
     st.header(f"📅 {station_choice} - 歷史總體 PM2.5 趨勢檢視")
     
-    # 💡 核心安全修正 3：加入 min_count=1，防止 resample 聚合時因為單日部分 NaN 導致整天歸零
-    df_hist_daily = df_pivot[['PM2.5']].resample('D').mean()
-    df_hist_daily.index.name = 'date'
+    # 💡 核心安全修正：拋棄會導致集體 NaN 的 resample，改用歷史原生高解析度逐時數據
+    df_hist = df_pivot[['PM2.5']].copy()
+    df_hist.index.name = 'date'
     
-    df_hist_daily['PM2.5'] = df_hist_daily['PM2.5'].interpolate(method='linear').bfill().ffill()
+    # 採取滑動平均（Rolling Window）進行平滑化，這樣既能看清趨勢，又絕對不會變成一條零線！
+    df_hist['PM2.5_Smooth'] = df_hist['PM2.5'].rolling(window=24, min_periods=1).mean()
     
-    # 渲染網頁圖表
-    st.line_chart(df_hist_daily, y="PM2.5")
-    st.info(f"資料統計範圍：{df_pivot.index.min()} 至 {df_pivot.index.max()}，共 {len(df_pivot):,} 筆原始資料。")
+    # 只繪製平滑曲線，乾淨漂亮
+    st.line_chart(df_hist[['PM2.5_Smooth']])
+    st.info(f"資料統計範圍：{df_pivot.index.min()} 至 {df_pivot.index.max()}，共 {len(df_pivot):,} 筆原生逐時大數據。")
 
 # ---------------------------------------------------------------------
 # Tab 2: XGBoost Prediction View
