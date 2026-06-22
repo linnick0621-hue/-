@@ -33,7 +33,7 @@ else:
     folder_path = "仁武測站"
 
 # =====================================================================
-# 3. Core Data Processing Engine
+# 3. Core Data Processing Engine (Jupyter Native Version)
 # =====================================================================
 @st.cache_data(ttl=600) 
 def load_and_process_data(path):
@@ -44,10 +44,14 @@ def load_and_process_data(path):
     dfs = []
     for f in files:
         try:
-            df_single = pd.read_csv(f, engine='python', on_bad_lines='skip', encoding='utf-8-sig')
-            if len(df_single.columns) == 1 and df_single.columns[0] == '即時值查詢':
-                df_single = pd.read_csv(f, engine='python', on_bad_lines='skip', encoding='utf-8-sig', skiprows=1)
+            # 💡 改回跟你們 Jupyter 一模一樣的原生讀取法，防止欄位錯位變空值
+            df_single = pd.read_csv(f)
             
+            # 標題行防呆
+            if len(df_single.columns) == 1 and df_single.columns[0] == '即時值查詢':
+                df_single = pd.read_csv(f, skiprows=1)
+            
+            # 中文欄位翻譯機
             rename_dict = {
                 '監測日期': 'monitordate', '日期': 'monitordate', '時間': 'monitordate', 'date': 'monitordate',
                 '測項英文名稱': 'itemengname', '測項': 'itemengname', '項目': 'itemengname', 'item': 'itemengname',
@@ -65,7 +69,8 @@ def load_and_process_data(path):
     df_all = pd.concat(dfs, ignore_index=True)
     df_all['concentration'] = pd.to_numeric(df_all['concentration'], errors='coerce')
     
-    df_pivot = df_all.pivot_table(index='monitordate', columns='itemengname', values='concentration', aggfunc='mean')
+    # 建立樞紐表
+    df_pivot = df_all.pivot_table(index='monitordate', columns='itemengname', values='concentration')
     df_pivot.index = pd.to_datetime(df_pivot.index, format='mixed')
     df_pivot = df_pivot.sort_index()
     
@@ -87,16 +92,16 @@ if df_pivot is None:
 tab1, tab2 = st.tabs(["📊 歷史年度大數據", "🎯 XGBoost 模型驗證與 6 月全月預報"])
 
 # ---------------------------------------------------------------------
-# Tab 1: Historical Data View (Fixed Squished Line Chart Issue)
+# Tab 1: Historical Data View (Fixed Horizontal Zero Line Issue)
 # ---------------------------------------------------------------------
 with tab1:
     st.header(f"📅 {station_choice} - 歷史總體 PM2.5 趨勢檢視")
     
-    # 💡 核心修正：將 5 萬多筆的「小時資料」轉換成「每日平均值」，圖表就不會擠死在右邊了！
+    # 將逐時資料轉為每日平均，避免 5 萬個點擠在一起畫不出來
     df_hist_daily = df_pivot[['PM2.5']].resample('D').mean()
     
     st.line_chart(df_hist_daily)
-    st.info(f"資料統計範圍：{df_pivot.index.min()} 至 {df_pivot.index.max()}，共 {len(df_pivot):,} 筆原始資料（已自動整合為每日趨勢呈現）。")
+    st.info(f"資料統計範圍：{df_pivot.index.min()} 至 {df_pivot.index.max()}，共 {len(df_pivot):,} 筆原始資料。")
 
 # ---------------------------------------------------------------------
 # Tab 2: XGBoost Prediction View
