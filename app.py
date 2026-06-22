@@ -95,28 +95,20 @@ if df_pivot is None:
 tab1, tab2 = st.tabs(["📊 歷史年度大數據", "🎯 XGBoost 模型驗證與 6 月全月預報"])
 
 # ---------------------------------------------------------------------
-# Tab 1: Historical Data View (💡 終極強制時間索引轉換)
+# Tab 1: Historical Data View (💡 終極修正：按月平均，徹底展開時間軸)
 # ---------------------------------------------------------------------
 with tab1:
     st.header(f"📅 {station_choice} - 歷史總體 PM2.5 趨勢檢視")
     
-    # 💡 終極修正 1：建立一個乾淨的 DataFrame，並「強迫」將索引轉為 Datetime 物件型態
-    df_hist = pd.DataFrame(index=pd.to_datetime(df_pivot.index))
-    df_hist['PM2.5'] = df_pivot['PM2.5'].values
+    # 💡 核心關鍵：將 5 萬多點重採樣為「每月平均」，並確保索引是乾淨的 Datetime 物件
+    df_hist_monthly = df_pivot[['PM2.5']].resample('ME').mean()
+    df_hist_monthly.index = pd.to_datetime(df_hist_monthly.index)
+    df_hist_monthly.index.name = 'date'
     
-    # 💡 終極修正 2：將逐時資料重採樣為「每日平均（'D'）」，大幅減少繪圖點數，防止網頁卡死
-    df_hist_daily = df_hist.resample('D').mean()
-    df_hist_daily.index.name = 'date'
-    
-    # 補洞，確保線條連續
-    df_hist_daily['PM2.5'] = df_hist_daily['PM2.5'].interpolate(method='linear').bfill().ffill()
-    
-    st.markdown("### 🔍 歷年波動資料觀測")
-    
-    # 💡 終極修正 3：明確指定 x 與 y 軸，強制 Streamlit 啟用時間軸引擎
-    st.line_chart(df_hist_daily, y="PM2.5")
-    
-    st.info(f"資料統計範圍：{df_pivot.index.min()} 至 {df_pivot.index.max()}，共 {len(df_pivot):,} 筆原始資料。")
+    st.markdown("### 🔍 歷年月份波動觀測")
+    # 💡 明確指定 y="PM2.5"，強迫圖表引擎對接
+    st.line_chart(df_hist_monthly, y="PM2.5")
+    st.info(f"資料統計範圍：{df_pivot.index.min()} 至 {df_pivot.index.max()}，共 {len(df_pivot):,} 筆原始資料（已整合為月平均趨勢防止網頁死機）。")
 
 # ---------------------------------------------------------------------
 # Tab 2: XGBoost Prediction View
