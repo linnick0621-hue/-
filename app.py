@@ -72,7 +72,7 @@ def load_and_process_data(path):
     df_all['monitordate'] = pd.to_datetime(df_all['monitordate'], format='mixed', errors='coerce')
     df_all = df_all.dropna(subset=['monitordate', 'concentration'])
     
-    # 建立樞紐表 (完美複製 Jupyter 邏輯)
+    # 建立樞紐表
     df_pivot = df_all.pivot_table(index='monitordate', columns='itemengname', values='concentration', aggfunc='mean')
     df_pivot = df_pivot.sort_index()
     
@@ -95,18 +95,20 @@ if df_pivot is None:
 tab1, tab2 = st.tabs(["📊 歷史年度大數據", "🎯 XGBoost 模型驗證與 6 月全月預報"])
 
 # ---------------------------------------------------------------------
-# Tab 1: Historical Data View (Fixed Resample Zero-Line Bug)
+# Tab 1: Historical Data View (Fixed 0-Line Using Area Chart)
 # ---------------------------------------------------------------------
 with tab1:
     st.header(f"📅 {station_choice} - 歷史總體 PM2.5 趨勢檢視")
     
-    # 💡 終極修正：直接使用原生逐時資料，加上 Rolling Window 平滑化處理（保持時間序列 DatetimeIndex 完整性）
-    df_hist = df_pivot[['PM2.5']].copy()
-    df_hist['PM2.5_Smooth'] = df_hist['PM2.5'].rolling(window=24, min_periods=1).mean()
-    df_hist.index.name = 'date'
+    # 💡 終極修正：直接將數據先 resample 成每日平均，並改用相容性最高的 st.area_chart 區域圖
+    df_hist_daily = df_pivot[['PM2.5']].resample('D').mean()
+    df_hist_daily.index.name = 'date'
     
-    # 僅畫出平滑線，避免前端卡死，且絕對不會是一條 0 死線
-    st.line_chart(df_hist[['PM2.5_Smooth']])
+    # 填補每日平均後可能產生的微小空隙
+    df_hist_daily['PM2.5'] = df_hist_daily['PM2.5'].interpolate(method='linear').bfill().ffill()
+    
+    # 用 area_chart 繪製，強制指定 y="PM2.5" 確保前端畫圖引腳成功對接！
+    st.area_chart(df_hist_daily, y="PM2.5")
     st.info(f"資料統計範圍：{df_pivot.index.min()} 至 {df_pivot.index.max()}，共 {len(df_pivot):,} 筆原始資料。")
 
 # ---------------------------------------------------------------------
