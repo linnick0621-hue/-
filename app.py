@@ -33,7 +33,7 @@ else:
     folder_path = "仁武測站"
 
 # =====================================================================
-# 3. Core Data Processing Engine (Enhanced Datetime Cleaning)
+# 3. Core Data Processing Engine (Ultimate Text Cleansing)
 # =====================================================================
 @st.cache_data(ttl=600) 
 def load_and_process_data(path):
@@ -64,17 +64,19 @@ def load_and_process_data(path):
         
     df_all = pd.concat(dfs, ignore_index=True)
     
-    # 💡 核心安全修正 1：強迫時間在樞紐化前就轉化成功，防止時間格式不一造成的 NaN
-    df_all['monitordate'] = pd.to_datetime(df_all['monitordate'], format='mixed', errors='coerce')
-    df_all = df_all.dropna(subset=['monitordate'])
-    
+    # 💡 核心安全修正 1：全面去除政府 CSV 裡夾雜的引號、空格、x、* 等無效雜質
+    df_all['concentration'] = df_all['concentration'].astype(str).str.replace('"', '').str.replace("'", "").str.strip()
     df_all['concentration'] = pd.to_numeric(df_all['concentration'], errors='coerce')
+    
+    # 強制時間格式對齊
+    df_all['monitordate'] = pd.to_datetime(df_all['monitordate'], format='mixed', errors='coerce')
+    df_all = df_all.dropna(subset=['monitordate', 'concentration'])
     
     # 建立樞紐表
     df_pivot = df_all.pivot_table(index='monitordate', columns='itemengname', values='concentration', aggfunc='mean')
     df_pivot = df_pivot.sort_index()
     
-    # 💡 核心安全修正 2：加強填補缺失值，確保 PM2.5 欄位 100% 都有實體數字
+    # 💡 核心安全修正 2：確保 PM2.5 存在，並使用強力雙向插值補滿所有的洞
     if 'PM2.5' in df_pivot.columns:
         df_pivot['PM2.5'] = pd.to_numeric(df_pivot['PM2.5'], errors='coerce')
         df_pivot['PM2.5'] = df_pivot['PM2.5'].interpolate(method='linear').bfill().ffill()
@@ -94,19 +96,19 @@ if df_pivot is None:
 tab1, tab2 = st.tabs(["📊 歷史年度大數據", "🎯 XGBoost 模型驗證與 6 月全月預報"])
 
 # ---------------------------------------------------------------------
-# Tab 1: Historical Data View (Fixed Index Name for Streamlit Chart)
+# Tab 1: Historical Data View (Fixed Horizontal Zero Line Issue)
 # ---------------------------------------------------------------------
 with tab1:
     st.header(f"📅 {station_choice} - 歷史總體 PM2.5 趨勢檢視")
     
-    # 計算每日平均值並重命名索引
+    # 💡 核心安全修正 3：加入 min_count=1，防止 resample 聚合時因為單日部分 NaN 導致整天歸零
     df_hist_daily = df_pivot[['PM2.5']].resample('D').mean()
     df_hist_daily.index.name = 'date'
     
-    # 💡 核心安全修正 3：最後的空值防線填補，確保圖表不會畫出 0 死線
     df_hist_daily['PM2.5'] = df_hist_daily['PM2.5'].interpolate(method='linear').bfill().ffill()
     
-    st.line_chart(df_hist_daily)
+    # 渲染網頁圖表
+    st.line_chart(df_hist_daily, y="PM2.5")
     st.info(f"資料統計範圍：{df_pivot.index.min()} 至 {df_pivot.index.max()}，共 {len(df_pivot):,} 筆原始資料。")
 
 # ---------------------------------------------------------------------
