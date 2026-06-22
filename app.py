@@ -33,7 +33,7 @@ else:
     folder_path = "仁武測站"
 
 # =====================================================================
-# 3. Core Data Processing Engine (Jupyter Native Version)
+# 3. Core Data Processing Engine
 # =====================================================================
 @st.cache_data(ttl=600) 
 def load_and_process_data(path):
@@ -44,14 +44,10 @@ def load_and_process_data(path):
     dfs = []
     for f in files:
         try:
-            # 💡 改回跟你們 Jupyter 一模一樣的原生讀取法，防止欄位錯位變空值
             df_single = pd.read_csv(f)
-            
-            # 標題行防呆
             if len(df_single.columns) == 1 and df_single.columns[0] == '即時值查詢':
                 df_single = pd.read_csv(f, skiprows=1)
             
-            # 中文欄位翻譯機
             rename_dict = {
                 '監測日期': 'monitordate', '日期': 'monitordate', '時間': 'monitordate', 'date': 'monitordate',
                 '測項英文名稱': 'itemengname', '測項': 'itemengname', '項目': 'itemengname', 'item': 'itemengname',
@@ -69,7 +65,6 @@ def load_and_process_data(path):
     df_all = pd.concat(dfs, ignore_index=True)
     df_all['concentration'] = pd.to_numeric(df_all['concentration'], errors='coerce')
     
-    # 建立樞紐表
     df_pivot = df_all.pivot_table(index='monitordate', columns='itemengname', values='concentration')
     df_pivot.index = pd.to_datetime(df_pivot.index, format='mixed')
     df_pivot = df_pivot.sort_index()
@@ -92,13 +87,14 @@ if df_pivot is None:
 tab1, tab2 = st.tabs(["📊 歷史年度大數據", "🎯 XGBoost 模型驗證與 6 月全月預報"])
 
 # ---------------------------------------------------------------------
-# Tab 1: Historical Data View (Fixed Horizontal Zero Line Issue)
+# Tab 1: Historical Data View (Fixed Index Name for Streamlit Chart)
 # ---------------------------------------------------------------------
 with tab1:
     st.header(f"📅 {station_choice} - 歷史總體 PM2.5 趨勢檢視")
     
-    # 將逐時資料轉為每日平均，避免 5 萬個點擠在一起畫不出來
+    # 💡 核心修正：把不認得的 monitordate 索引名稱強制改成 date，並計算每日平均
     df_hist_daily = df_pivot[['PM2.5']].resample('D').mean()
+    df_hist_daily.index.name = 'date'
     
     st.line_chart(df_hist_daily)
     st.info(f"資料統計範圍：{df_pivot.index.min()} 至 {df_pivot.index.max()}，共 {len(df_pivot):,} 筆原始資料。")
@@ -146,4 +142,5 @@ with tab2:
     st.markdown("> 💡 **提示**：滑鼠移過去可以直接看到每小時的精確數值，也可以用兩指縮放看細節喔！")
     
     # Draw Line Chart
+    df_chart.index.name = 'date'
     st.line_chart(df_chart, y=['XGBoost 全月預測值', '最新實際觀測值'] if '最新實際觀測值' in df_chart.columns else ['XGBoost 全月預測值'])
