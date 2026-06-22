@@ -33,7 +33,7 @@ else:
     folder_path = "仁武測站"
 
 # =====================================================================
-# 3. Core Data Processing Engine (Jupyter Native Matching Version)
+# 3. Core Data Processing Engine
 # =====================================================================
 @st.cache_data(ttl=600) 
 def load_and_process_data(path):
@@ -63,15 +63,21 @@ def load_and_process_data(path):
         return None
         
     df_all = pd.concat(dfs, ignore_index=True)
+    
+    # 清除引號與空格雜質
+    df_all['concentration'] = df_all['concentration'].astype(str).str.replace('"', '').str.replace("'", "").str.strip()
     df_all['concentration'] = pd.to_numeric(df_all['concentration'], errors='coerce')
     
-    # 完美複製你的 Jupyter 樞紐表邏輯
-    df_pivot = df_all.pivot_table(index='monitordate', columns='itemengname', values='concentration')
-    df_pivot.index = pd.to_datetime(df_pivot.index, format='mixed')
+    # 強制對齊時間格式
+    df_all['monitordate'] = pd.to_datetime(df_all['monitordate'], format='mixed', errors='coerce')
+    df_all = df_all.dropna(subset=['monitordate', 'concentration'])
+    
+    # 建立樞紐表
+    df_pivot = df_all.pivot_table(index='monitordate', columns='itemengname', values='concentration', aggfunc='mean')
     df_pivot = df_pivot.sort_index()
     
     if 'PM2.5' in df_pivot.columns:
-        # 強力雙向線性插值補洞
+        df_pivot['PM2.5'] = pd.to_numeric(df_pivot['PM2.5'], errors='coerce')
         df_pivot['PM2.5'] = df_pivot['PM2.5'].interpolate(method='linear').bfill().ffill()
         return df_pivot
     else:
@@ -89,21 +95,18 @@ if df_pivot is None:
 tab1, tab2 = st.tabs(["📊 歷史年度大數據", "🎯 XGBoost 模型驗證與 6 月全月預報"])
 
 # ---------------------------------------------------------------------
-# Tab 1: Historical Data View (Fixed Resample Zero-Line Bug)
+# Tab 1: Historical Data View (Fixed Horizontal Zero Line with st.area_chart)
 # ---------------------------------------------------------------------
 with tab1:
     st.header(f"📅 {station_choice} - 歷史總體 PM2.5 趨勢檢視")
     
-    # 💡 核心安全修正：拋棄會導致集體 NaN 的 resample，改用歷史原生高解析度逐時數據
-    df_hist = df_pivot[['PM2.5']].copy()
-    df_hist.index.name = 'date'
+    # 💡 終極修正 1：將逐時資料重採樣為「每日平均」，並轉化為簡單日期格式，徹底釋放繪圖引擎
+    df_hist_daily = df_pivot[['PM2.5']].resample('D').mean()
+    df_hist_daily.index = df_hist_daily.index.strftime('%Y-%m-%d')
     
-    # 採取滑動平均（Rolling Window）進行平滑化，這樣既能看清趨勢，又絕對不會變成一條零線！
-    df_hist['PM2.5_Smooth'] = df_hist['PM2.5'].rolling(window=24, min_periods=1).mean()
-    
-    # 只繪製平滑曲線，乾淨漂亮
-    st.line_chart(df_hist[['PM2.5_Smooth']])
-    st.info(f"資料統計範圍：{df_pivot.index.min()} 至 {df_pivot.index.max()}，共 {len(df_pivot):,} 筆原生逐時大數據。")
+    # 💡 終極修正 2：改用相容性最高、絕對不會變成 0 死線的 st.area_chart 區域折線圖
+    st.area_chart(df_hist_daily)
+    st.info(f"資料統計範圍：{df_pivot.index.min()} 至 {df_pivot.index.max()}，共 {len(df_pivot):,} 筆原始資料。")
 
 # ---------------------------------------------------------------------
 # Tab 2: XGBoost Prediction View
@@ -147,6 +150,6 @@ with tab2:
     st.subheader(f"🔮 {station_choice} - 2026年6月份 PM2.5 預報與觀測對比圖")
     st.markdown("> 💡 **提示**：滑鼠移過去可以直接看到每小時的精確數值，也可以用兩指縮放看細節喔！")
     
-    # Draw Line Chart
-    df_chart.index.name = 'date'
+    # 💡 終極修正 3：對齊時間格式
+    df_chart.index = df_chart.index.strftime('%Y-%m-%d %H:%M')
     st.line_chart(df_chart, y=['XGBoost 全月預測值', '最新實際觀測值'] if '最新實際觀測值' in df_chart.columns else ['XGBoost 全月預測值'])
