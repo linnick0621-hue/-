@@ -82,15 +82,16 @@ if df_pivot is None:
 tab1, tab2 = st.tabs(["📊 歷史年度大數據", "🎯 XGBoost 模型驗證與 6 月全月預報"])
 
 # ---------------------------------------------------------------------
-# Tab 1: 歷史年度數據 (改用 Streamlit 內建無痕圖表，完美防爆中文)
+# Tab 1: 歷史年度數據 (改用 Streamlit 內建無痕網頁圖表，完美防爆)
 # ---------------------------------------------------------------------
 with tab1:
-    st.header(f"📅 {station_choice} - 各年份歷史資料獨立檢視")
+    st.header(f"📅 {station_choice} - 歷史總體 PM2.5 趨勢檢視")
     df_hist = df_pivot[['PM2.5']].copy()
+    # 拋棄 matplotlib，直接用原生 st.line_chart 畫圖
     st.line_chart(df_hist, y="PM2.5")
 
 # ---------------------------------------------------------------------
-# Tab 2: XGBoost 預報大圖 (改用互動式圖表，手機滑動可看精確數值)
+# Tab 2: XGBoost 預報大圖 (改用內建互動式圖表，手機也能滑)
 # ---------------------------------------------------------------------
 with tab2:
     st.header("🎯 XGBoost 歷史模型驗證與全月趨勢預報")
@@ -121,16 +122,15 @@ with tab2:
     # 擷取 6 月實際數據
     df_june_real = df_pivot[(df_pivot.index.year == 2026) & (df_pivot.index.month == 6)]
     
-    # 合併兩條線以便畫圖
+    # 合併兩條線
     df_chart = pd.DataFrame(index=june_timestamps)
     df_chart['XGBoost 全月預測值'] = df_june_fc['XGBoost 全月預測值']
     
     if len(df_june_real) > 0:
-        # 將實測值對齊時間軸
         df_chart['最新實際觀測值'] = df_june_real['PM2.5']
         
     st.subheader(f"🔮 {station_choice} - 2026年6月份 PM2.5 預報與觀測對比圖")
-    st.markdown("> 💡 **提示**：你可以用滑鼠或手指在圖表上**放大、縮放**，滑過去還能直接看到每小時的精確 PM2.5 數值喔！")
+    st.markdown("> 💡 **提示**：滑鼠移過去可以直接看到每小時的精確數值，也可以用兩指縮放看細節喔！")
     
-    # 繪製內建的高級互動網頁圖表
+    # 畫圖
     st.line_chart(df_chart, y=['XGBoost 全月預測值', '最新實際觀測值'] if '最新實際觀測值' in df_chart.columns else ['XGBoost 全月預測值'])
