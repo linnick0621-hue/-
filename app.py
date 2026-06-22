@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import glob
-import matplotlib.pyplot as plt
 import xgboost as xgb
 
 # =====================================================================
@@ -14,10 +13,6 @@ st.set_page_config(
     layout="wide",  
     initial_sidebar_state="expanded"
 )
-
-# 設定中文黑體防方塊
-plt.rcParams['font.family'] = ['Microsoft JhengHei'] 
-plt.rcParams['axes.unicode_minus'] = False           
 
 st.title("🤖 台灣特定測站 - PM2.5 歷史分析與 XGBoost 系統")
 st.markdown("本系統整合了 **長短期歷史數據清洗**、**XGBoost 機器學習模型驗證**與**未來一個月滾動趨勢預報**。")
@@ -34,12 +29,8 @@ station_choice = st.sidebar.selectbox(
 
 if station_choice == "台北陽明測站":
     folder_path = "陽明測站"
-    theme_color = '#1f77b4' 
-    station_name_eng = "Yangming Station"
 else:
     folder_path = "仁武測站"
-    theme_color = '#ff7f0e' 
-    station_name_eng = "Renwu Station"
 
 # =====================================================================
 # 2. 資料讀取與核心清洗核心
@@ -86,36 +77,26 @@ if df_pivot is None:
     st.stop()
 
 # =====================================================================
-# 3. 網頁分頁功能 (Tabs) - 調整順序，讓 XGBoost 點進去直接看大圖！
+# 3. 網頁分頁功能 (Tabs)
 # =====================================================================
 tab1, tab2 = st.tabs(["📊 歷史年度大數據", "🎯 XGBoost 模型驗證與 6 月全月預報"])
 
 # ---------------------------------------------------------------------
-# Tab 1: 歷史年度數據
+# Tab 1: 歷史年度數據 (改用 Streamlit 內建無痕圖表，完美防爆中文)
 # ---------------------------------------------------------------------
 with tab1:
     st.header(f"📅 {station_choice} - 各年份歷史資料獨立檢視")
-    unique_years = sorted(df_pivot.index.year.unique())
-    fig1, axes = plt.subplots(len(unique_years), 1, figsize=(15, 2.5 * len(unique_years)), sharey=True)
-    if len(unique_years) == 1:
-        axes = [axes]
-    for i, year in enumerate(unique_years):
-        df_year = df_pivot[df_pivot.index.year == year]
-        axes[i].plot(df_year.index, df_year['PM2.5'], color=theme_color, linewidth=1, alpha=0.8)
-        axes[i].set_title(f'{station_name_eng} - {year} 年 PM2.5 歷史趨勢 (共 {len(df_year):,} 筆)', fontsize=11, fontweight='bold')
-        axes[i].set_ylabel(r'PM2.5 ($\mu g/m^3$)', fontsize=9)
-        axes[i].grid(True, linestyle=':', alpha=0.6)
-    plt.tight_layout()
-    st.pyplot(fig1, use_container_width=True)
+    df_hist = df_pivot[['PM2.5']].copy()
+    st.line_chart(df_hist, y="PM2.5")
 
 # ---------------------------------------------------------------------
-# Tab 2: XGBoost 預報大圖（已將圖表完美前挪至此）
+# Tab 2: XGBoost 預報大圖 (改用互動式圖表，手機滑動可看精確數值)
 # ---------------------------------------------------------------------
 with tab2:
     st.header("🎯 XGBoost 歷史模型驗證與全月趨勢預報")
     st.success("模型評估成功！測試集決定係數 (R² Score) 達 0.79，具備高度準確信賴區間。")
     
-    # 訓練長期時間特徵模型
+    # 訓練模型
     df_future_ml = df_pivot.copy()
     df_future_ml['hour'] = df_future_ml.index.hour
     df_future_ml['dayofweek'] = df_future_ml.index.dayofweek
@@ -135,28 +116,21 @@ with tab2:
     df_june_fc['month'] = df_june_fc.index.month
     df_june_fc['year'] = df_june_fc.index.year
     df_june_fc['day'] = df_june_fc.index.day
-    df_june_fc['Predicted_PM2.5'] = model_future.predict(df_june_fc[time_features])
+    df_june_fc['XGBoost 全月預測值'] = model_future.predict(df_june_fc[time_features])
     
     # 擷取 6 月實際數據
     df_june_real = df_pivot[(df_pivot.index.year == 2026) & (df_pivot.index.month == 6)]
     
-    # 開始繪圖
-    fig3, ax3 = plt.subplots(figsize=(15, 6))
-    ax3.plot(df_june_fc.index, df_june_fc['Predicted_PM2.5'], color='#e377c2', linewidth=2, linestyle='--', label='XGBoost 全月完整預測趨勢 (1日~30日)')
+    # 合併兩條線以便畫圖
+    df_chart = pd.DataFrame(index=june_timestamps)
+    df_chart['XGBoost 全月預測值'] = df_june_fc['XGBoost 全月預測值']
     
     if len(df_june_real) > 0:
-        ax3.plot(df_june_real.index, df_june_real['PM2.5'], color='#1f77b4', linewidth=2.5, alpha=0.8, label='最新實際觀測數據 (已發生)')
-        last_time = df_june_real.index.max()
-        ax3.axvline(x=last_time, color='#7f7f7f', linestyle='-.', linewidth=1.5)
-        ax3.text(last_time, ax3.get_ylim()[1]*0.88, '  今日觀測截止點 / 預報起點 ->', fontsize=11, color='#444444', fontweight='bold')
+        # 將實測值對齊時間軸
+        df_chart['最新實際觀測值'] = df_june_real['PM2.5']
         
-    ax3.set_title(f'{station_choice} - 2026年6月份 PM2.5 預報與觀測對比圖', fontsize=13, fontweight='bold')
-    ax3.set_xlabel('2026年6月 日期', fontsize=11)
-    ax3.set_ylabel(r'PM2.5 濃度 ($\mu g/m^3$)', fontsize=11)
-    ax3.axhline(y=15, color='r', linestyle=':', label='WHO 24小時健康標準線 (15 μg/m³)')
-    ax3.xaxis.set_major_locator(plt.matplotlib.dates.DayLocator(interval=2))
-    ax3.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%m/%d'))
-    ax3.legend(loc='upper right', fontsize=10)
-    ax3.grid(True, linestyle=':', alpha=0.6)
+    st.subheader(f"🔮 {station_choice} - 2026年6月份 PM2.5 預報與觀測對比圖")
+    st.markdown("> 💡 **提示**：你可以用滑鼠或手指在圖表上**放大、縮放**，滑過去還能直接看到每小時的精確 PM2.5 數值喔！")
     
-    st.pyplot(fig3, use_container_width=True)
+    # 繪製內建的高級互動網頁圖表
+    st.line_chart(df_chart, y=['XGBoost 全月預測值', '最新實際觀測值'] if '最新實際觀測值' in df_chart.columns else ['XGBoost 全月預測值'])
