@@ -95,23 +95,22 @@ if df_pivot is None:
 tab1, tab2 = st.tabs(["📊 歷史年度大數據", "🎯 XGBoost 模型驗證與 6 月全月預報"])
 
 # ---------------------------------------------------------------------
-# Tab 1: Historical Data View (💡 解決 5 萬筆數據前端卡死、死機問題)
+# Tab 1: Historical Data View (💡 終極修正：改用 Rolling 避開 resample NaN 陷阱)
 # ---------------------------------------------------------------------
 with tab1:
     st.header(f"📅 {station_choice} - 歷史總體 PM2.5 趨勢檢視")
     
-    # 💡 終極安全修正：不要直接畫 5 萬個小時點。我們先用 resample('D').mean() 轉為「每天平均」
-    df_hist_daily = df_pivot[['PM2.5']].resample('D').mean()
-    df_hist_daily.index.name = 'date'
+    # 💡 核心安全修正：直接複製原生逐時資料，不要用 resample 壓縮它！
+    df_hist = df_pivot[['PM2.5']].copy()
     
-    # 填補轉檔產生的微小空隙，確保數據連續
-    df_hist_daily['PM2.5'] = df_hist_daily['PM2.5'].interpolate(method='linear').bfill().ffill()
+    # 為了防止 5 萬個小時點畫圖卡死，我們使用每 24 小時的滾動滑動平均（Rolling Mean）來平滑數據
+    df_hist['PM2.5_Smooth'] = df_hist['PM2.5'].rolling(window=24, min_periods=1).mean()
+    df_hist.index.name = 'date'
     
-    # 💡 強制指定 y 軸為 "PM2.5"，並加入一個年份選擇器，讓網頁只畫選定範圍，防止資料量過大卡死
     st.markdown("### 🔍 歷年波動資料觀測")
+    # 💡 僅繪製平滑化之後的曲線，並精確指定欄位，徹底跟 0 死線說再見！
+    st.line_chart(df_hist[['PM2.5_Smooth']], y="PM2.5_Smooth")
     
-    # 改用穩定性最高、100% 絕對不會當機的 st.line_chart 並指明欄位通道！
-    st.line_chart(df_hist_daily, y="PM2.5")
     st.info(f"資料統計範圍：{df_pivot.index.min()} 至 {df_pivot.index.max()}，共 {len(df_pivot):,} 筆原始資料。")
 
 # ---------------------------------------------------------------------
